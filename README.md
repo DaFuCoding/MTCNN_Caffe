@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Caffe
 
 [![Build Status](https://travis-ci.org/BVLC/caffe.svg?branch=master)](https://travis-ci.org/BVLC/caffe)
@@ -35,3 +36,13 @@ Please cite Caffe in your publications if it helps your research:
       Title = {Caffe: Convolutional Architecture for Fast Feature Embedding},
       Year = {2014}
     }
+=======
+# MTCNN_Caffe
+该工程是根据[MTCNN](https://github.com/kpzhang93/MTCNN_face_detection_alignment)程序修改的，从caffe的Matlab接口修改成c++的接口。
+
+先安装caffe，之后编译example/MTSrc/MTMain.cpp
+运行build/examples/MTSrc/MTMain.bin 即可
+
+其中有许多没有发现的小问题，希望大家一起解决。
+
+>>>>>>> dc273dd4d238f3cd0fe829013f3d725934005311
