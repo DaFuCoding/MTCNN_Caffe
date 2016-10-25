@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Caffe
 
 [![Build Status](https://travis-ci.org/BVLC/caffe.svg?branch=master)](https://travis-ci.org/BVLC/caffe)
@@ -45,4 +44,3 @@ Please cite Caffe in your publications if it helps your research:
 
 其中有许多没有发现的小问题，希望大家一起解决。
 
->>>>>>> dc273dd4d238f3cd0fe829013f3d725934005311
