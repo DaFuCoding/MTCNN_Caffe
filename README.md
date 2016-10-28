@@ -14,6 +14,10 @@ This original project is [MTCNN](https://github.com/kpzhang93/MTCNN_face_detecti
 
 [e.g.: ./build/examples/MTSrc/MTMain.bin '/home/dafu/workspace/MTCNN_Caffe/examples/MTmodel' '/home/dafu/workspace/MTCNN_Caffe/examples/MTSrc/test2.jpg']
 
+## Modify
+
+I add a MemoryData input layer in prototxt file(R-net and O-net) so that to set dynamically batch size. This modify can add speed and  take full advantage of GPU resources.
+
 =======
 # Caffe
 
