@@ -35,25 +35,6 @@ typedef struct FaceInfo {
   double yaw;
 } FaceInfo;
 
-void printFaceInfo(const std::vector<FaceInfo> &faceInfo){
-    std::cout << std::endl;
-    for(int i=0;i<faceInfo.size();i++){
-      std::cout <<faceInfo[i].bbox.y1<<" "<<faceInfo[i].bbox.x1<<" "<<
-            faceInfo[i].bbox.y2<<" "<<faceInfo[i].bbox.x2<<" "<<faceInfo[i].bbox.score<<" "<<
-            faceInfo[i].regression[0]<<" "<<faceInfo[i].regression[1]<<" "<<
-            faceInfo[i].regression[2]<<" "<<faceInfo[i].regression[3]<<std::endl;
-      for(int j=0;j<5;j++){
-        std::cout << faceInfo[i].facePts.x[j]<<' ';
-      }
-      std::cout << std::endl;
-      for(int j=0;j<5;j++){
-        std::cout << faceInfo[i].facePts.y[j]<<' ';
-      }
-      std::cout << std::endl;
-    }
-    std::cin.get();
-}
-
 class MTCNN {
  public:
   MTCNN(const string& proto_model_dir);
@@ -68,8 +49,6 @@ class MTCNN {
   void SetMean();
   void GenerateBoundingBox( Blob<float>* confidence,Blob<float>* reg,
           float scale,float thresh,int image_width,int image_height);
-  void ClassifyFace(const std::vector<FaceRect> &regressed_rects, cv::Mat &sample_single,
-        boost::shared_ptr<Net<float> >& net, double thresh, char netName);
   void ClassifyFace_MulImage(const std::vector<FaceInfo> &regressed_rects, cv::Mat &sample_single,
         boost::shared_ptr<Net<float> >& net, double thresh, char netName);
   std::vector<FaceInfo> NonMaximumSuppression(std::vector<FaceInfo>& bboxes,float thresh,char methodType);
@@ -170,10 +149,12 @@ void MTCNN::Bbox2Square(std::vector<FaceInfo>& bboxes){
     float side = h>w ? h:w;
     bboxes[i].bbox.x1 += (h-side)*0.5;
     bboxes[i].bbox.y1 += (w-side)*0.5;
-    bboxes[i].bbox.x2 = std::floor(bboxes[i].bbox.x1 + side);
-    bboxes[i].bbox.y2 = std::floor(bboxes[i].bbox.y1 + side);
-    bboxes[i].bbox.x1 = std::floor(bboxes[i].bbox.x1);
-    bboxes[i].bbox.y1 = std::floor(bboxes[i].bbox.y1);
+
+    bboxes[i].bbox.x2 = (int)(bboxes[i].bbox.x1 + side);
+    bboxes[i].bbox.y2 = (int)(bboxes[i].bbox.y1 + side);
+    bboxes[i].bbox.x1 = (int)(bboxes[i].bbox.x1);
+    bboxes[i].bbox.y1 = (int)(bboxes[i].bbox.y1);
+
   }
 }
 
@@ -214,8 +195,6 @@ void MTCNN::Padding(int img_w,int img_h){
   }
 }
 
-// TODO:
-// convert const to var in width and height of feature map
 void MTCNN::GenerateBoundingBox(Blob<float>* confidence,Blob<float>* reg,
       float scale,float thresh,int image_width,int image_height){
   int stride = 2;
@@ -223,6 +202,7 @@ void MTCNN::GenerateBoundingBox(Blob<float>* confidence,Blob<float>* reg,
 
   int curr_feature_map_w_ = std::ceil((image_width - cellSize)*1.0/stride)+1;
   int curr_feature_map_h_ = std::ceil((image_height - cellSize)*1.0/stride)+1;
+
   //std::cout << "Feature_map_size:"<< curr_feature_map_w_ <<" "<<curr_feature_map_h_<<std::endl;
   int regOffset = curr_feature_map_w_*curr_feature_map_h_;
   // the first count numbers are confidence of face
@@ -236,17 +216,11 @@ void MTCNN::GenerateBoundingBox(Blob<float>* confidence,Blob<float>* reg,
     if(*(confidence_data+i)>=thresh){
       int y = i / curr_feature_map_w_;
       int x = i - curr_feature_map_w_ * y;
-      // TODO
-      // CHECK the x,y,w,h
-//      std::cout <<"XTop: "<<std::floor((x*stride+1)/scale)<<' '
-//                <<"YTop: "<<std::floor((y*stride+1)/scale)<<' '
-//                <<"XBot: "<<std::floor((x*stride+cellSize-1+1)/scale)<<' '
-//                <<"YBot: "<<std::floor((y*stride+cellSize-1+1)/scale)<<' '
-//                <<std::endl;
-      float xTop = std::floor((x*stride+1)/scale);
-      float yTop = std::floor((y*stride+1)/scale);
-      float xBot = std::floor((x*stride+cellSize-1+1)/scale);
-      float yBot = std::floor((y*stride+cellSize-1+1)/scale);
+
+      float xTop = (int)((x*stride+1)/scale);
+      float yTop = (int)((y*stride+1)/scale);
+      float xBot = (int)((x*stride+cellSize-1+1)/scale);
+      float yBot = (int)((y*stride+cellSize-1+1)/scale);
       FaceRect faceRect;
       faceRect.x1 = xTop;
       faceRect.y1 = yTop;
@@ -305,76 +279,6 @@ void MTCNN::WrapInputLayer(std::vector<cv::Mat>* input_channels,
     input_data += width * height;
   }
 }
-
-/*
-// regressed_rects_ ----> condidate_rects_
-void MTCNN::ClassifyFace(const std::vector<FaceRect>& regressed_rects,cv::Mat &sample_single,
-        boost::shared_ptr<Net<float> >& net,double thresh,char netName){
-  int numBox = regressed_rects.size();
-  Blob<float>* crop_input_layer = net->input_blobs()[0];
-  int input_channels = crop_input_layer->channels();
-  int input_width  = crop_input_layer->width();
-  int input_height = crop_input_layer->height();
-  crop_input_layer->Reshape(1, input_channels, input_width, input_height);
-  net->Reshape();
-  condidate_rects_.clear();
-  for(int i=0;i<numBox;i++){
-    std::vector<cv::Mat> channels;
-    WrapInputLayer(&channels,net->input_blobs()[0],input_width,input_height);
-
-    cv::Mat crop_img = sample_single(cv::Range(regressed_rects[i].y1-1,regressed_rects[i].y2),
-                         cv::Range(regressed_rects[i].x1-1,regressed_rects[i].x2));
-
-    cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_AREA);
-    crop_img = (crop_img-127.5)*0.0078125;
-    cv::split(crop_img,channels);
-
-    CHECK(reinterpret_cast<float*>(channels.at(0).data) == net->input_blobs()[0]->cpu_data())
-          << "Input channels are not wrapping the input layer of the network.";
-    net->Forward();
-
-    // return RNet/ONet result
-
-    Blob<float>* reg = net->output_blobs()[0];
-    const float* reg_data = reg->cpu_data();
-    Blob<float>* confidence;
-    Blob<float>* points;
-    if (netName == 'r')
-      confidence = net->output_blobs()[1];
-    else if(netName == 'o'){
-      points = net->output_blobs()[1];
-      confidence = net->output_blobs()[2];
-    }
-    const float* confidence_data = confidence->cpu_data() + confidence->count()/2;
-
-    if(*(confidence_data) > thresh){
-      FaceRect faceRect;
-      faceRect.x1 = regressed_rects[i].x1;
-      faceRect.y1 = regressed_rects[i].y1;
-      faceRect.x2 = regressed_rects[i].x2;
-      faceRect.y2 = regressed_rects[i].y2 ;
-      faceRect.score  = *(confidence_data);
-      FaceInfo faceInfo;
-      faceInfo.bbox = faceRect;
-      faceInfo.regression = cv::Vec4f(reg_data[0],reg_data[1],reg_data[2],reg_data[3]);
-      condidate_rects_.push_back(faceInfo);
-      if(netName == 'o'){
-        FacePts face_pts;
-        float w = faceRect.y2 - faceRect.y1 + 1;
-        float h = faceRect.x2 - faceRect.x1 + 1;
-        const float* points_data = points->cpu_data();
-
-        for(int j=0;j<5;j++){
-          face_pts.x[j] = faceRect.x1 + *(points_data+j) * h - 1;
-          face_pts.y[j] = faceRect.y1 + *(points_data+j+5) * w -1;
-        }
-        //faces_pts_buf_.push_back(face_pts);
-      }
-    }
-  }
-}
-*/
-
 // multi test image pass a forward
 void MTCNN::ClassifyFace_MulImage(const std::vector<FaceInfo>& regressed_rects,cv::Mat &sample_single,
         boost::shared_ptr<Net<float> >& net,double thresh,char netName){
@@ -390,12 +294,16 @@ void MTCNN::ClassifyFace_MulImage(const std::vector<FaceInfo>& regressed_rects,c
 
   // load crop_img data to datum
   for(int i=0;i<numBox;i++){
+    int pad_top   = std::abs(regressed_pading_[i].bbox.x1 - regressed_rects[i].bbox.x1);
+    int pad_left  = std::abs(regressed_pading_[i].bbox.y1 - regressed_rects[i].bbox.y1);
+    int pad_right = std::abs(regressed_pading_[i].bbox.y2 - regressed_rects[i].bbox.y2);
+    int pad_bottom= std::abs(regressed_pading_[i].bbox.x2 - regressed_rects[i].bbox.x2);
 
     cv::Mat crop_img = sample_single(cv::Range(regressed_pading_[i].bbox.y1-1,regressed_pading_[i].bbox.y2),
                          cv::Range(regressed_pading_[i].bbox.x1-1,regressed_pading_[i].bbox.x2));
+    cv::copyMakeBorder(crop_img,crop_img,pad_left,pad_right,pad_top,pad_bottom,cv::BORDER_CONSTANT,cv::Scalar(0));
 
     cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_AREA);
-
     crop_img = (crop_img-127.5)*0.0078125;
     Datum datum;
     CvMatToDatumSignalChannel(crop_img,&datum);
@@ -453,7 +361,6 @@ void MTCNN::ClassifyFace_MulImage(const std::vector<FaceInfo>& regressed_rects,c
     }
   }
 }
-
 bool MTCNN::CvMatToDatumSignalChannel(const cv::Mat& cv_mat, Datum* datum){
   if (cv_mat.empty())
     return false;
@@ -507,8 +414,6 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
   }
 
   // 11ms main consum
-  // TODO:
-  // bounding problem: bbox and points inaccurate
   Blob<float>* input_layer = PNet_->input_blobs()[0];
   for(int i=0;i<factor_count;i++)
   {
@@ -544,83 +449,35 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
   int numBox = total_boxes_.size();
   if(numBox != 0){
     total_boxes_ = NonMaximumSuppression(total_boxes_,0.7,'u');
-    //printFaceInfo(total_boxes_);
-
     regressed_rects_ = BoxRegress(total_boxes_,1);
     total_boxes_.clear();
 
     Bbox2Square(regressed_rects_);
     Padding(width,height);
-    //printFaceInfo(regressed_rects_);
 
     /// Second stage
-    //ClassifyFace(regressed_rects_,sample_single,RNet_,threshold[1],'r');
     ClassifyFace_MulImage(regressed_rects_,sample_single,RNet_,threshold[1],'r');
-
     condidate_rects_ = NonMaximumSuppression(condidate_rects_,0.7,'u');
-    //printFaceInfo(condidate_rects_);
     regressed_rects_ = BoxRegress(condidate_rects_,2);
 
     Bbox2Square(regressed_rects_);
     Padding(width,height);
-    //printFaceInfo(regressed_rects_);
 
     /// three stage
     numBox = regressed_rects_.size();
     if(numBox != 0){
-      //ClassifyFace(regressed_rects_,sample_single,ONet_,threshold[2],'o');
       ClassifyFace_MulImage(regressed_rects_,sample_single,ONet_,threshold[2],'o');
       regressed_rects_ = BoxRegress(condidate_rects_,3);
-
-      //printFaceInfo(regressed_rects_);
       faceInfo = NonMaximumSuppression(regressed_rects_,0.7,'m');
     }
   }
   regressed_pading_.clear();
   regressed_rects_.clear();
   condidate_rects_.clear();
-
-}
-
-void fddb_test(std::string imageFileNameList , std::string outPutFileName){
-  ::google::InitGoogleLogging("");
-  std::string proto_model_dir = "/home/dafu/workspace/MTCNN/examples/MTmodel";
-  MTCNN detector(proto_model_dir);
-  double threshold[3] = {0.6,0.7,0.7};
-  double factor=0.709;
-  int minSize=40;
-
-  std::fstream fp(imageFileNameList.c_str());
-  std::fstream fout(outPutFileName.c_str());
-  std::string imageRoot = "/home/dafu/FaceDataBase/FDDB/";
-  std::string imageName;
-  while(fp){
-    fp >> imageName;
-    std::cout << imageName<<std::endl;
-    cv::Mat image = cv::imread((imageRoot+imageName+".jpg"));
-    std::vector<FaceInfo> faceInfo;
-    detector.Detect(image,faceInfo,minSize,threshold,factor);
-    //fout<< imageName<<std::endl<<regressed_rects.size()<<std::endl;
-    for(int i = 0;i<faceInfo.size();i++){
-      float x = faceInfo[i].bbox.x1;
-      float y = faceInfo[i].bbox.y1;
-      float h = faceInfo[i].bbox.x2 - faceInfo[i].bbox.x1 +1;
-      float w = faceInfo[i].bbox.y2 - faceInfo[i].bbox.y1 +1;
-      cv::rectangle(image,cv::Rect(y,x,w,h),cv::Scalar(255,0,0),2);
-    }
-    for(int i=0;i<faceInfo.size();i++){
-      FacePts facePts = faceInfo[i].facePts;
-      for(int j=0;j<5;j++)
-        cv::circle(image,cv::Point(facePts.y[j],facePts.x[j]),1,cv::Scalar(255,255,0),2);
-    }
-    cv::imshow("a",image);
-    cv::waitKey(0);
-  }
 }
 
 int main(int argc,char **argv)
 {
-  //fddb_test("/home/dafu/FaceDataBase/FDDB/RYFdefined/FDDBNameList.txt","/home/dafu/workspace/MTCNN_Caffe/examples/MTSrc/fddb.txt");
   if(argc != 3){
     std::cout << "MTMain.bin [model dir] [imagePath]"<<std::endl;
     return 0;
@@ -654,39 +511,5 @@ int main(int argc,char **argv)
   cv::imshow("a",image);
   cv::waitKey(0);
 
-/*
-  std::cout <<"Start."<<std::endl;
-  //cv::VideoCapture cap("/home/dafu/Videos/locoProjectVideo/GH_Y6_DownLoad_1/Videos/20160902_184328.mp4");
-  cv::VideoCapture cap(0);
-  cv::Mat frame;
-  while(cap.read(frame)){
-    clock_t t1 = clock();
-    std::vector<cv::Mat> channels;
-//    cv::split(frame,channels);
-//    for(int i=0;i<3;i++){
-//      cv::equalizeHist( channels[i], channels[i] );
-//    }
-//    cv::merge(channels,frame);
-    std::vector<FaceInfo> faceInfo;
-
-    detector.Detect(frame,faceInfo,minSize,threshold,factor);
-    std::cout<<" Time Using GPU-CUDNN: " << (clock() - t1)*1.0/1000<<std::endl;
-    for(int i = 0;i<faceInfo.size();i++){
-      float x = faceInfo[i].bbox.x1;
-      float y = faceInfo[i].bbox.y1;
-      float h = faceInfo[i].bbox.x2 - faceInfo[i].bbox.x1 +1;
-      float w = faceInfo[i].bbox.y2 - faceInfo[i].bbox.y1 +1;
-      cv::rectangle(frame,cv::Rect(y,x,w,h),cv::Scalar(255,0,0),2);
-    }
-    for(int i=0;i<faceInfo.size();i++){
-      FacePts facePts = faceInfo[i].facePts;
-      for(int j=0;j<5;j++)
-        cv::circle(frame,cv::Point(facePts.y[j],facePts.x[j]),1,cv::Scalar(255,255,0),2);
-    }
-      cv::imshow("a",frame);
-      if((char)cv::waitKey(10) == 'q')
-        break;
-    }
-*/
   return 1;
 }
