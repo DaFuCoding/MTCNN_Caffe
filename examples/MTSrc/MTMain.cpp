@@ -11,7 +11,7 @@
 // boost
 #include "boost/make_shared.hpp"
 
-//#define CPU_ONLY
+#define CPU_ONLY
 using namespace caffe;
 
 typedef struct FaceRect {
@@ -49,6 +49,8 @@ class MTCNN {
   void SetMean();
   void GenerateBoundingBox( Blob<float>* confidence,Blob<float>* reg,
           float scale,float thresh,int image_width,int image_height);
+  void ClassifyFace(const std::vector<FaceInfo>& regressed_rects,cv::Mat &sample_single,
+        boost::shared_ptr<Net<float> >& net,double thresh,char netName);
   void ClassifyFace_MulImage(const std::vector<FaceInfo> &regressed_rects, cv::Mat &sample_single,
         boost::shared_ptr<Net<float> >& net, double thresh, char netName);
   std::vector<FaceInfo> NonMaximumSuppression(std::vector<FaceInfo>& bboxes,float thresh,char methodType);
@@ -249,15 +251,22 @@ MTCNN::MTCNN(const std::string &proto_model_dir){
   CHECK_EQ(PNet_->num_outputs(),2) << "Network should have exactly two output, one"
                                      " is bbox and another is confidence.";
 
-  //RNet_.reset(new Net<float>((proto_model_dir+"/det2.prototxt"), TEST));
+  #ifdef CPU_ONLY
+  RNet_.reset(new Net<float>((proto_model_dir+"/det2.prototxt"), TEST));
+  #else
   RNet_.reset(new Net<float>((proto_model_dir+"/det2_input.prototxt"), TEST));
+  #endif
   RNet_->CopyTrainedLayersFrom(proto_model_dir+"/det2.caffemodel");
 
 //  CHECK_EQ(RNet_->num_inputs(), 0) << "Network should have exactly one input.";
 //  CHECK_EQ(RNet_->num_outputs(),3) << "Network should have exactly two output, one"
 //                                     " is bbox and another is confidence.";
 
+  #ifdef CPU_ONLY
+  ONet_.reset(new Net<float>((proto_model_dir+"/det3.prototxt"), TEST));
+  #else
   ONet_.reset(new Net<float>((proto_model_dir+"/det3_input.prototxt"), TEST));
+  #endif
   ONet_->CopyTrainedLayersFrom(proto_model_dir+"/det3.caffemodel");
 
 //  CHECK_EQ(ONet_->num_inputs(), 1) << "Network should have exactly one input.";
@@ -279,6 +288,80 @@ void MTCNN::WrapInputLayer(std::vector<cv::Mat>* input_channels,
     input_data += width * height;
   }
 }
+
+void MTCNN::ClassifyFace(const std::vector<FaceInfo>& regressed_rects,cv::Mat &sample_single,
+        boost::shared_ptr<Net<float> >& net,double thresh,char netName){
+  int numBox = regressed_rects.size();
+  Blob<float>* crop_input_layer = net->input_blobs()[0];
+  int input_channels = crop_input_layer->channels();
+  int input_width  = crop_input_layer->width();
+  int input_height = crop_input_layer->height();
+  crop_input_layer->Reshape(1, input_channels, input_width, input_height);
+  net->Reshape();
+
+  condidate_rects_.clear();
+  // load crop_img data to datum
+  for(int i=0;i<numBox;i++){
+    std::vector<cv::Mat> channels;
+    WrapInputLayer(&channels,net->input_blobs()[0],input_width,input_height);
+    int pad_top   = std::abs(regressed_pading_[i].bbox.x1 - regressed_rects[i].bbox.x1);
+    int pad_left  = std::abs(regressed_pading_[i].bbox.y1 - regressed_rects[i].bbox.y1);
+    int pad_right = std::abs(regressed_pading_[i].bbox.y2 - regressed_rects[i].bbox.y2);
+    int pad_bottom= std::abs(regressed_pading_[i].bbox.x2 - regressed_rects[i].bbox.x2);
+
+    cv::Mat crop_img = sample_single(cv::Range(regressed_pading_[i].bbox.y1-1,regressed_pading_[i].bbox.y2),
+                         cv::Range(regressed_pading_[i].bbox.x1-1,regressed_pading_[i].bbox.x2));
+    cv::copyMakeBorder(crop_img,crop_img,pad_left,pad_right,pad_top,pad_bottom,cv::BORDER_CONSTANT,cv::Scalar(0));
+
+    cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_AREA);
+    crop_img = (crop_img-127.5)*0.0078125;
+    cv::split(crop_img,channels);
+
+    CHECK(reinterpret_cast<float*>(channels.at(0).data) == net->input_blobs()[0]->cpu_data())
+          << "Input channels are not wrapping the input layer of the network.";
+    net->Forward();
+
+    int reg_id = 0;
+    int confidence_id = 1;
+    if(netName == 'o') confidence_id = 2;
+    const Blob<float>* reg = net->output_blobs()[reg_id];
+    const Blob<float>* confidence = net->output_blobs()[confidence_id];
+    // ONet points_offset != NULL
+    const Blob<float>* points_offset = net->output_blobs()[1];
+
+    const float* confidence_data = confidence->cpu_data() + confidence->count()/2;
+    const float* reg_data = reg->cpu_data();
+    const float* points_data;
+    if(netName == 'o') points_data = points_offset->cpu_data();
+
+    if(*(confidence_data) > thresh){
+      FaceRect faceRect;
+      faceRect.x1 = regressed_rects[i].bbox.x1;
+      faceRect.y1 = regressed_rects[i].bbox.y1;
+      faceRect.x2 = regressed_rects[i].bbox.x2;
+      faceRect.y2 = regressed_rects[i].bbox.y2 ;
+      faceRect.score  = *(confidence_data);
+      FaceInfo faceInfo;
+      faceInfo.bbox = faceRect;
+      faceInfo.regression = cv::Vec4f(reg_data[0],reg_data[1],reg_data[2],reg_data[3]);
+
+      // x x x x x y y y y y
+      if(netName == 'o'){
+        FacePts face_pts;
+        float w = faceRect.y2 - faceRect.y1 + 1;
+        float h = faceRect.x2 - faceRect.x1 + 1;
+        for(int j=0;j<5;j++){
+          face_pts.y[j] = faceRect.y1 + *(points_data+j) * h - 1;
+          face_pts.x[j] = faceRect.x1 + *(points_data+j+5) * w -1;
+        }
+        faceInfo.facePts = face_pts;
+      }
+      condidate_rects_.push_back(faceInfo);
+    }
+  }
+  regressed_pading_.clear();
+}
+
 // multi test image pass a forward
 void MTCNN::ClassifyFace_MulImage(const std::vector<FaceInfo>& regressed_rects,cv::Mat &sample_single,
         boost::shared_ptr<Net<float> >& net,double thresh,char netName){
@@ -456,7 +539,11 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
     Padding(width,height);
 
     /// Second stage
+    #ifdef CPU_ONLY
+    ClassifyFace(regressed_rects_,sample_single,RNet_,threshold[1],'r');
+    #else
     ClassifyFace_MulImage(regressed_rects_,sample_single,RNet_,threshold[1],'r');
+    #endif
     condidate_rects_ = NonMaximumSuppression(condidate_rects_,0.7,'u');
     regressed_rects_ = BoxRegress(condidate_rects_,2);
 
@@ -466,7 +553,11 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
     /// three stage
     numBox = regressed_rects_.size();
     if(numBox != 0){
-      ClassifyFace_MulImage(regressed_rects_,sample_single,ONet_,threshold[2],'o');
+      #ifdef CPU_ONLY
+      ClassifyFace(regressed_rects_,sample_single,RNet_,threshold[1],'r');
+      #else
+      ClassifyFace_MulImage(regressed_rects_,sample_single,RNet_,threshold[1],'r');
+      #endif
       regressed_rects_ = BoxRegress(condidate_rects_,3);
       faceInfo = NonMaximumSuppression(regressed_rects_,0.7,'m');
     }
@@ -495,7 +586,11 @@ int main(int argc,char **argv)
   clock_t t1 = clock();
   std::cout <<"Detect "<<image.rows<<"X"<<image.cols;
   detector.Detect(image,faceInfo,minSize,threshold,factor);
+  #ifdef CPU_ONLY
+  std::cout<<" Time Using CPU: " << (clock() - t1)*1.0/1000<<std::endl;
+  #else
   std::cout<<" Time Using GPU-CUDNN: " << (clock() - t1)*1.0/1000<<std::endl;
+  #endif
   for(int i = 0;i<faceInfo.size();i++){
     float x = faceInfo[i].bbox.x1;
     float y = faceInfo[i].bbox.y1;
