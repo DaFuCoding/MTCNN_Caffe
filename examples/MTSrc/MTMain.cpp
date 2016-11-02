@@ -11,7 +11,7 @@
 // boost
 #include "boost/make_shared.hpp"
 
-#define CPU_ONLY
+//#define CPU_ONLY
 using namespace caffe;
 
 typedef struct FaceRect {
@@ -554,9 +554,9 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
     numBox = regressed_rects_.size();
     if(numBox != 0){
       #ifdef CPU_ONLY
-      ClassifyFace(regressed_rects_,sample_single,RNet_,threshold[1],'r');
+      ClassifyFace(regressed_rects_,sample_single,ONet_,threshold[2],'o');
       #else
-      ClassifyFace_MulImage(regressed_rects_,sample_single,RNet_,threshold[1],'r');
+      ClassifyFace_MulImage(regressed_rects_,sample_single,ONet_,threshold[2],'o');
       #endif
       regressed_rects_ = BoxRegress(condidate_rects_,3);
       faceInfo = NonMaximumSuppression(regressed_rects_,0.7,'m');
@@ -576,7 +576,7 @@ int main(int argc,char **argv)
   ::google::InitGoogleLogging(argv[0]);
   double threshold[3] = {0.6,0.7,0.7};
   double factor = 0.709;
-  int minSize = 24;
+  int minSize = 40;
   std::string proto_model_dir = argv[1];
   MTCNN detector(proto_model_dir);
 
