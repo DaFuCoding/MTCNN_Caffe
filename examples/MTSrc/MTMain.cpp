@@ -12,6 +12,7 @@
 #include "boost/make_shared.hpp"
 
 //#define CPU_ONLY
+#define INTER_FAST
 using namespace caffe;
 
 typedef struct FaceRect {
@@ -312,8 +313,11 @@ void MTCNN::ClassifyFace(const std::vector<FaceInfo>& regressed_rects,cv::Mat &s
     cv::Mat crop_img = sample_single(cv::Range(regressed_pading_[i].bbox.y1-1,regressed_pading_[i].bbox.y2),
                          cv::Range(regressed_pading_[i].bbox.x1-1,regressed_pading_[i].bbox.x2));
     cv::copyMakeBorder(crop_img,crop_img,pad_left,pad_right,pad_top,pad_bottom,cv::BORDER_CONSTANT,cv::Scalar(0));
-
+#ifdef INTER_FAST
+    cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_NEAREST);
+#else
     cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_AREA);
+#endif
     crop_img = (crop_img-127.5)*0.0078125;
     cv::split(crop_img,channels);
 
@@ -386,7 +390,11 @@ void MTCNN::ClassifyFace_MulImage(const std::vector<FaceInfo>& regressed_rects,c
                          cv::Range(regressed_pading_[i].bbox.x1-1,regressed_pading_[i].bbox.x2));
     cv::copyMakeBorder(crop_img,crop_img,pad_left,pad_right,pad_top,pad_bottom,cv::BORDER_CONSTANT,cv::Scalar(0));
 
+#ifdef INTER_FAST
+    cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_NEAREST);
+#else
     cv::resize(crop_img,crop_img,cv::Size(input_width,input_height),0,0,cv::INTER_AREA);
+#endif
     crop_img = (crop_img-127.5)*0.0078125;
     Datum datum;
     CvMatToDatumSignalChannel(crop_img,&datum);
@@ -506,6 +514,11 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
 
     // wrap image and normalization using INTER_AREA method
     cv::resize(sample_single,resized,cv::Size(ws,hs),0,0,cv::INTER_AREA);
+#ifdef INTER_FAST
+    cv::resize(sample_single,resized,cv::Size(ws,hs),0,0,cv::INTER_NEAREST);
+#else
+    cv::resize(sample_single,resized,cv::Size(ws,hs),0,0,cv::INTER_AREA);
+#endif
     resized.convertTo(resized, CV_32FC3, 0.0078125,-127.5*0.0078125);
 
     // input data
