@@ -574,7 +574,11 @@ void MTCNN::Detect(const cv::Mat& image,std::vector<FaceInfo>& faceInfo,int minS
       regressed_rects_ = BoxRegress(condidate_rects_,3);
       faceInfo = NonMaximumSuppression(regressed_rects_,0.7,'m');
     }
+    else
+      faceInfo.clear();
   }
+  else
+    faceInfo.clear();
   regressed_pading_.clear();
   regressed_rects_.clear();
   condidate_rects_.clear();
